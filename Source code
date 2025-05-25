@@ -1,0 +1,105 @@
+import pandas as pd
+import numpy as np
+from sklearn.model_selection import train_test_split
+from sklearn.ensemble import RandomForestClassifier
+from sklearn.metrics import (
+    classification_report, accuracy_score,
+    confusion_matrix, log_loss, roc_curve, auc
+)
+from sklearn.preprocessing import StandardScaler, label_binarize
+from sklearn.utils import shuffle
+import matplotlib.pyplot as plt
+import seaborn as sns
+
+# ————————————
+# 1) LOAD & LABEL
+# ————————————
+benign  = pd.read_csv("/content/CSV_benign.csv",  on_bad_lines='skip', engine='python')
+malware = pd.read_csv("/content/CSV_malware.csv", on_bad_lines='skip', engine='python')
+benign['label']  = 0
+malware['label'] = 1
+
+# ————————————
+# 2) COMBINE & SHUFFLE
+# ————————————
+data = pd.concat([benign, malware], ignore_index=True)
+data = shuffle(data, random_state=42).reset_index(drop=True)
+
+# ————————————
+# 3) FEATURES & LABELS
+# ————————————
+y = data['label']
+X = data.drop(columns=['label'])
+
+# ————————————
+# 4) CLEAN & IMPUTE
+# ————————————
+X = X.apply(pd.to_numeric, errors='coerce')          # convert to numeric
+X.replace([np.inf, -np.inf], np.nan, inplace=True)   # infinities → NaN
+X = X.fillna(X.median())                             # impute missing with median
+X = X.select_dtypes(include=[np.number])             # keep numeric only
+y = y.loc[X.index]                                   # realign labels
+
+# ————————————
+# 5) SCALE & SPLIT
+# ————————————
+X_scaled = StandardScaler().fit_transform(X)
+X_train, X_test, y_train, y_test = train_test_split(
+    X_scaled, y, test_size=0.2, stratify=y, random_state=42
+)
+
+# ————————————
+# 6) TRAIN
+# ————————————
+model = RandomForestClassifier(n_estimators=100, max_depth=10, random_state=42)
+model.fit(X_train, y_train)
+
+# ————————————
+# 7) PREDICT
+# ————————————
+y_pred  = model.predict(X_test)
+y_proba = model.predict_proba(X_test)
+
+# ————————————
+# 8) RESULTS (Section VII)
+# ————————————
+
+# a) Accuracy & Classification Report
+print("▶ Accuracy:", accuracy_score(y_test, y_pred))
+print("\n▶ Classification Report:\n",
+      classification_report(y_test, y_pred, target_names=['Benign','Malware']))
+
+# b) True/False Positives & Negatives
+cm = confusion_matrix(y_test, y_pred)
+tn, fp, fn, tp = cm.ravel()
+print(f"▶ True Positives:  {tp}")
+print(f"▶ True Negatives:  {tn}")
+print(f"▶ False Positives: {fp}")
+print(f"▶ False Negatives: {fn}")
+
+# c) Confusion Matrix Plot
+plt.figure(figsize=(5,4))
+sns.heatmap(cm, annot=True, fmt="d", cmap="Blues",
+            xticklabels=['Benign','Malware'],
+            yticklabels=['Benign','Malware'])
+plt.title("Confusion Matrix")
+plt.xlabel("Predicted")
+plt.ylabel("Actual")
+plt.show()
+
+# d) Cross‑Entropy Loss
+print("▶ Cross‑Entropy Loss:", log_loss(y_test, y_proba))
+
+# e) ROC Curve
+y_test_bin = label_binarize(y_test, classes=[0,1])
+fpr, tpr, _ = roc_curve(y_test_bin.ravel(), y_proba[:,1])
+roc_auc = auc(fpr, tpr)
+
+plt.figure(figsize=(6,5))
+plt.plot(fpr, tpr, label=f'Malware ROC (AUC = {roc_auc:.2f})')
+plt.plot([0,1], [0,1], 'k--', lw=1)
+plt.xlabel("False Positive Rate")
+plt.ylabel("True Positive Rate")
+plt.title("ROC Curve for Malware Detection")
+plt.legend(loc="lower right")
+plt.show()
